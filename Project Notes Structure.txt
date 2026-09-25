@@ -1,0 +1,779 @@
+pip install psycopg[binary]
+
+pip install python-dotenv
+
+--------------------- 14-09-2026 -----------------------------
+FINAL ARCHITECTURE WE ARE GOING TO BUILD
+
+
+
+jeeva-herbs/
+│
+├── backend/
+│   │
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── .env
+│   ├── requirements.txt
+│   ├── manage.py
+│   │
+│   ├── config/
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   ├── asgi.py
+│   │   └── ...
+│   │
+│   ├── accounts/              ← LOGIN / REGISTER
+│   │   ├── models.py
+│   │   ├── managers.py
+│   │   ├── serializers.py
+│   │   ├── schemas.py
+│   │   ├── authentication.py
+│   │   ├── permissions.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   └── migrations/
+│   │
+│   ├── store/                 ← PRODUCTS / ORDERS
+│   │   ├── models.py
+│   │   ├── admin.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── signals.py
+│   │   └── migrations/
+│   │
+│   └── fastapi_app/           ← REALTIME / AI
+│       ├── main.py
+│       ├── auth.py
+│       ├── websocket.py
+│       ├── chatbot.py
+│       └── ...
+│
+├── frontend/
+│   │
+│   ├── package.json
+│   ├── vite.config.js
+│   │
+│   └── src/
+│       ├── main.jsx
+│       ├── App.jsx
+│       ├── style.css
+│       │
+│       ├── components/
+│       │   ├── Navbar.jsx
+│       │   ├── ProductCard.jsx
+│       │   ├── ProductGrid.jsx
+│       │   ├── CartDrawer.jsx
+│       │   ├── ChatWidget.jsx
+│       │   └── ...
+│       │
+│       ├── pages/
+│       │   ├── Home.jsx
+│       │   ├── Login.jsx
+│       │   ├── Register.jsx
+│       │   ├── AdminLogin.jsx
+│       │   ├── Products.jsx
+│       │   ├── ProductDetails.jsx
+│       │   ├── Cart.jsx
+│       │   ├── Checkout.jsx
+│       │   ├── MyOrders.jsx
+│       │   └── OrderDetails.jsx
+│       │
+│       ├── context/
+│       │   ├── AuthContext.jsx
+│       │   └── CartContext.jsx
+│       │
+│       ├── hooks/
+│       │   └── useOrderStatus.js
+│       │
+│       └── services/
+│           └── api.js
+│
+└── README.md
+
+
+
+🏗️ HOW THE FINAL SYSTEM WILL WORK
+Customer
+Customer
+   ↓
+React
+   ↓
+Register / Login
+   ↓
+JWT
+   ↓
+FastAPI/Django API
+   ↓
+PostgreSQL
+
+
+After login:
+
+Home
+ ↓
+Products
+ ↓
+Product Details
+ ↓
+Add to Cart
+ ↓
+Checkout
+ ↓
+Address
+ ↓
+Payment
+ ↓
+Order Created
+ ↓
+My Orders
+ ↓
+Live Order Status
+
+
+👨‍💼 ADMIN
+
+Admin is completely separate.
+
+Admin
+ ↓
+Admin Login
+ ↓
+JWT
+ ↓
+Admin Dashboard
+
+Dashboard:
+
+Dashboard
+│
+├── Products
+│   ├── Add
+│   ├── Edit
+│   ├── Disable
+│   ├── Price
+│   └── Stock
+│
+├── Orders
+│   ├── Pending
+│   ├── Confirmed
+│   ├── Packed
+│   ├── Shipped
+│   └── Delivered
+│
+├── Customers
+│
+├── Categories
+│
+├── FAQs
+│
+└── Inventory
+
+
+🔥 REALTIME FLOW
+
+This is the part that makes your project a proper realtime application.
+
+Suppose admin changes:
+
+Murungai Soup
+₹120 → ₹135
+
+Stock
+20 → 5
+
+Flow:
+
+Admin Dashboard
+       ↓
+Django
+       ↓
+PostgreSQL
+       ↓
+Django Signal
+       ↓
+Redis
+       ↓
+FastAPI
+       ↓
+WebSocket
+       ↓
+React Customer
+
+React immediately changes:
+
+
+₹135
+Stock: 5
+
+without refresh.
+
+Your existing backend already has the beginning of this Redis/WebSocket idea, so we will improve it instead of throwing it away.
+
+
+🤖 AI CHATBOT
+
+The chatbot will not use hardcoded product prices.
+
+Your existing FastAPI code already reads products and FAQs from the database before constructing the AI context.
+
+We'll make it properly authenticated/context-aware later.
+
+Final flow:
+
+
+Customer
+   ↓
+"Murungai soup price?"
+   ↓
+FastAPI
+   ↓
+PostgreSQL
+   ↓
+Current Product
+   ↓
+AI
+   ↓
+Answer
+
+If admin changes:
+
+₹120 → ₹135
+the chatbot sees ₹135.
+
+This follows the goal in Claude's guide that React should fetch dynamic product data instead of relying on the hardcoded product array.
+
+
+
+🗄️ DATABASE DESIGN
+
+We're going to build the database in stages.
+
+Stage 1 — Django system tables
+
+First:
+
+django_migrations
+django_content_type
+auth_permission
+auth_group
+django_session
+...
+
+These are only the Django foundation.
+
+
+
+Stage 2 — Authentication tables
+
+Then we'll create:
+
+users
+
+with:
+
+id
+name
+email
+phone
+password
+role
+is_active
+created_at
+updated_at
+
+Roles:
+
+CUSTOMER
+ADMIN
+
+Later we can add:
+
+STAFF
+
+if required.
+
+Stage 3 — Product tables
+categories
+products
+
+Product:
+
+id
+category
+name
+slug
+description
+ingredients
+price
+unit
+stock
+image
+is_active
+created_at
+updated_at
+
+
+Stage 4 — Cart
+carts
+cart_items
+Stage 5 — Address
+addresses
+Stage 6 — Orders
+
+Instead of the simple JSON items approach in Claude's skeleton, we'll make proper relational tables:
+
+orders
+order_items
+order_status_history
+
+This is much better for a real e-commerce application.
+
+Claude's guide currently uses:
+
+items = models.JSONField()
+
+in its simplified Order example.
+
+We will not blindly use that design.
+
+We'll use:
+
+Order
+   ↓
+OrderItem
+   ↓
+Product
+
+because you want a real application.
+
+Stage 7 — Payment
+payments
+
+with things such as:
+
+payment_id
+order
+method
+amount
+status
+transaction_id
+created_at
+Stage 8 — FAQs
+faqs
+📌 NOW: WHERE YOU SHOULD START
+
+This is the most important part.
+
+❌ DON'T DO THIS
+
+Don't start:
+
+Login.jsx
+
+yet.
+
+Don't start:
+
+Product.jsx
+
+yet.
+
+Don't start copying Claude's shop/models.py.
+
+Don't run random migrations.
+
+Don't manually create PostgreSQL tables.
+
+
+✅ START HERE
+PHASE 0 — CLEAN FOUNDATION
+
+We first make sure these four things work:
+
+Docker
+  ↓
+PostgreSQL
+  ↓
+Django
+  ↓
+Redis
+
+Your database must be created by Docker, exactly as you requested.
+
+STEP 0.1 — Docker PostgreSQL
+
+From your:
+
+backend/
+
+run:
+
+docker compose down
+
+Then:
+
+docker compose build
+
+Then:
+
+docker compose up -d db redis
+
+Check:
+
+docker compose ps
+
+Expected:
+
+jeeva_herbs_db       Up
+jeeva_herbs_redis    Up
+STEP 0.2 — Start Django
+docker compose up -d web
+
+Then:
+
+docker compose ps
+
+Expected:
+
+jeeva_herbs_db
+jeeva_herbs_redis
+jeeva_herbs_backend
+STEP 0.3 — Migration
+
+Only Docker.
+
+Run:
+
+docker compose exec web python manage.py makemigrations
+
+Then:
+
+docker compose exec web python manage.py migrate
+
+Then:
+
+docker compose exec web python manage.py showmigrations
+
+Everything should have:
+
+[X]
+STEP 0.4 — Verify PostgreSQL
+
+Run:
+
+docker compose exec db psql -U postgres -d jeeva_herbs
+
+Then:
+
+\dt
+
+You should see Django tables.
+
+Exit:
+
+\q
+🚨 IMPORTANT: DON'T CREATE SUPERUSER
+
+Do not do:
+
+python manage.py createsuperuser
+
+We are going to build our own Admin authentication.
+
+Your intended architecture specifically separates customer and admin authentication rather than exposing Django's standard superuser flow.
+
+THEN PHASE 1 — AUTHENTICATION DATABASE
+
+Once the above is successful, this is our first actual application development phase.
+
+We'll create:
+
+backend/accounts/
+
+and implement:
+
+Backend
+accounts/models.py
+accounts/managers.py
+accounts/serializers.py
+accounts/authentication.py
+accounts/permissions.py
+accounts/views.py
+accounts/urls.py
+accounts/migrations/
+
+We'll implement:
+
+Customer Registration
+Customer Login
+Admin Login
+JWT
+Password hashing
+Role checking
+Token refresh
+Logout
+Current user
+THEN PHASE 2 — FRONTEND AUTHENTICATION
+
+We'll convert your current single main.jsx into proper React structure.
+
+Your current frontend is currently one large component containing the products, cart, FAQ, WebSocket, and chatbot logic.
+
+We'll split it.
+
+First:
+
+src/
+├── App.jsx
+├── main.jsx
+│
+├── pages/
+│   ├── Login.jsx
+│   ├── Register.jsx
+│   └── AdminLogin.jsx
+│
+├── context/
+│   └── AuthContext.jsx
+│
+├── components/
+│   └── ProtectedRoute.jsx
+│
+└── services/
+    └── api.js
+
+Then test:
+
+Customer Register
+       ↓
+PostgreSQL
+       ↓
+Customer Login
+       ↓
+JWT
+       ↓
+Customer Home
+
+And separately:
+
+Admin Login
+       ↓
+JWT
+       ↓
+Admin Dashboard
+THEN WE BUILD THE WEBSITE IN THIS ORDER
+PHASE 3 — PRODUCTS
+Category
+Product
+Inventory
+Images
+Price
+Stock
+
+Admin:
+
+Add Product
+Edit Product
+Change Price
+Change Stock
+Deactivate Product
+
+Customer:
+
+Product List
+Product Details
+Search
+Category
+Stock
+Price
+PHASE 4 — CART
+Add
+Remove
+Increase
+Decrease
+Quantity validation
+Stock validation
+Total
+PHASE 5 — CHECKOUT
+Customer
+ ↓
+Cart
+ ↓
+Address
+ ↓
+Delivery fee
+ ↓
+Order summary
+ ↓
+Payment
+PHASE 6 — ORDERS
+
+Customer:
+
+My Orders
+ ↓
+Order Details
+ ↓
+Status
+
+Admin:
+
+New Order
+ ↓
+Confirmed
+ ↓
+Packed
+ ↓
+Shipped
+ ↓
+Delivered
+PHASE 7 — REALTIME
+
+Only after the basic order flow works:
+
+Django
+ ↓
+Signal
+ ↓
+Redis
+ ↓
+FastAPI
+ ↓
+WebSocket
+ ↓
+React
+
+Then customer sees status changes immediately.
+
+Claude's guide also recommends putting realtime WebSocket integration after the core product/order functionality is stable.
+
+PHASE 8 — AI
+Chat Widget
+ ↓
+FastAPI
+ ↓
+PostgreSQL
+ ↓
+Products
+FAQs
+Orders
+ ↓
+OpenAI
+ ↓
+Answer
+PHASE 9 — PAYMENT
+
+We'll integrate the actual payment gateway only after:
+
+Cart ✅
+Checkout ✅
+Orders ✅
+
+because payment should create/update a real order/payment record rather than being bolted onto the current static site.
+
+PHASE 10 — PRODUCTION
+
+Finally:
+
+React
+ ↓
+Production build
+
+Django
+ ↓
+Production server
+
+FastAPI
+ ↓
+Production server
+
+PostgreSQL
+ ↓
+Production DB
+
+Redis
+ ↓
+Production Redis
+
+HTTPS
+ ↓
+Domain
+
+The original guide also places deployment after the core application and realtime work.
+
+🟢 YOUR CURRENT STATUS
+
+Based on the actual files you uploaded:
+
+Part	Current state	Action
+React	🟡 Basic working	Refactor later
+Django	🟡 Foundation exists	Fix DB config
+FastAPI	🟡 Basic working	Improve later
+PostgreSQL	🟡 Docker config exists	Test now
+Redis	🟡 Docker config exists	Test now
+Docker	🟡 Config exists	Fix/test now
+Authentication	❌ Not implemented	Next major phase
+Products DB	🟡 Existing model	Review before finalizing
+Cart	🟡 Local React only	Rebuild after auth
+Checkout	❌	Later
+Orders	🟡 Basic API	Rebuild around authenticated users
+Realtime	🟡 Prototype	Later
+AI	🟡 Prototype	Later
+Payment	❌	Later
+Production	❌	Final
+⭐ So your immediate path is ONLY this
+TODAY
+│
+├── 1. Fix Docker configuration
+│
+├── 2. Docker creates PostgreSQL
+│
+├── 3. Docker starts Redis
+│
+├── 4. Django connects to Docker PostgreSQL
+│
+├── 5. Django migrations
+│
+└── 6. Verify tables
+          ↓
+     STOP
+          ↓
+NEXT
+          ↓
+┌──────────────────────────────┐
+│ PAGE 2                       │
+│ AUTHENTICATION DATABASE      │
+│                              │
+│ User model                   │
+│ Customer/Admin roles         │
+│ Password hashing             │
+│ JWT                          │
+│ Register API                 │
+│ Login API                    │
+│ Admin Login API              │
+│ Permissions                  │
+└──────────────────────────────┘
+          ↓
+┌──────────────────────────────┐
+│ PAGE 3                       │
+│ REACT AUTHENTICATION         │
+│                              │
+│ Register.jsx                 │
+│ Login.jsx                    │
+│ AdminLogin.jsx               │
+│ AuthContext                  │
+│ ProtectedRoute               │
+│ API service                  │
+└──────────────────────────────┘
+
+This is the path I recommend. Don't follow the old Claude build order literally; use the guide as the product/architecture reference, but use your actual ZIP as the codebase. The guide itself describes its content as a roadmap/working skeleton rather than a complete implementation.
+
+First task now
+
+Do only the Docker + PostgreSQL migration steps above.
+
+Once you get migrate successful, send me the output. Then I'll start PAGE 2 — AUTHENTICATION DATABASE and give you the actual files/code to add to your current backend, not a generic new project.
+
+
+
+
