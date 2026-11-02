@@ -3316,9 +3316,6 @@ def get_product_context():
     return json.dumps(product_details, ensure_ascii=False)
 
 
-# Remove the search_knowledge import at the top of main.py if it's no longer used elsewhere
-# from fastapi_app.rag_service import search_knowledge  <-- Remove this line
-
 @app.post("/api/support/chat")
 def support_chat(data: SupportChatRequest):
     try:
@@ -3332,10 +3329,13 @@ def support_chat(data: SupportChatRequest):
         history = []
         if stored_history:
             history = json.loads(stored_history)
-            if len(history) >= 20:
+            if len(history) >=20:
                 history = history[-20:]
             else:
                 history = history
+
+        # Keep only recent messages
+        
 
         conversation_history = "\n".join(
             f"{'Customer' if item['role'] == 'user' else 'Assistant'}: "
@@ -3347,21 +3347,76 @@ def support_chat(data: SupportChatRequest):
         # 3. Get current product details from database
         product_context = get_product_context()
 
-        # 4. Generate answer - The LLM will now dynamically call the RAG tool if it needs to
+        # Build search query from recent conversation
+        history_text = "\n".join(
+            item["content"]
+            for item in history
+            if item.get("role") in ("user", "assistant")
+        )
+
+        search_query = f"""
+        Recent conversation:
+        {history_text}
+
+        Current question:
+        {data.question}
+        """
+
+        # 4. Search existing RAG knowledge base
+        documents = search_knowledge(search_query, k=3)
+
+        rag_context = "\n\n".join(
+            f"Source: {doc.metadata.get('source', 'Knowledge base')}\n"
+            f"{doc.page_content}"
+            for doc in documents
+        )
+
+        # 5. Combine database and RAG context
+        context_parts = []
+
+        if product_context:
+            context_parts.append(
+                "CURRENT PRODUCT DATA FROM DATABASE:\n" + product_context
+            )
+
+        if rag_context:
+            context_parts.append("BUSINESS KNOWLEDGE BASE:\n" + rag_context)
+
+        context = "\n\n".join(context_parts)
+
+        if not context:
+            return {
+                "success": True,
+                "answer": (
+                    "I couldn't find enough information to answer "
+                    "that question. Please contact our support team."
+                ),
+                "sources": [],
+                "conversation_id": conversation_id,
+            }
+
+        # 6. Generate answer using recent conversation
         answer = generate_support_answer(
             question=data.question,
-            product_context=product_context, # Pass product_context directly
+            context=context,
             conversation_history=conversation_history,
         )
 
-        # 5. Save recent messages temporarily in Redis
+        # 7. Save recent messages temporarily in Redis
         history.extend(
             [
-                {"role": "user", "content": data.question},
-                {"role": "assistant", "content": answer},
+                {
+                    "role": "user",
+                    "content": data.question,
+                },
+                {
+                    "role": "assistant",
+                    "content": answer,
+                },
             ]
         )
 
+        # Keep the latest 8 messages (4 conversation turns)
         history = history[-20:]
 
         redis_client.setex(
@@ -3370,23 +3425,36 @@ def support_chat(data: SupportChatRequest):
             json.dumps(history, ensure_ascii=False),
         )
 
-        # 6. Return answer
+        # 8. Return answer and conversation ID
+        sources = []
+
+        if product_context:
+            sources.append("Product Database")
+
+        sources.extend(
+            doc.metadata.get("source", "Knowledge base") for doc in documents
+        )
+
         return {
             "success": True,
             "answer": answer,
-            "sources": ["AI Assistant"], # Simplified since the LLM manages the sources internally now
+            "sources": list(dict.fromkeys(sources)),
             "conversation_id": conversation_id,
         }
 
     except Exception as e:
-        print(f"Support chat error: {type(e).__name__}: {e!r}", flush=True)
-        import traceback
+        print(
+            f"Support chat error: {type(e).__name__}: {e!r}",
+            flush=True,
+        )
         traceback.print_exc()
 
         raise HTTPException(
             status_code=500,
             detail="Unable to answer your question right now.",
         )
+
+
 
 
 @app.websocket("/ws")

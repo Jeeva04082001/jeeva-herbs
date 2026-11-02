@@ -1,3 +1,4 @@
+
 from pathlib import Path
 import os
 
@@ -16,8 +17,6 @@ INDEX_DIR = BASE_DIR / "faiss_index"
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 
-# Initialize global cache for the vector store
-_vector_store = None
 
 class GeminiEmbeddings(Embeddings):
     def __init__(self):
@@ -47,28 +46,7 @@ class GeminiEmbeddings(Embeddings):
         return response.embeddings[0].values
 
 
-def get_vector_store():
-    """Loads and caches the FAISS index in memory on the first call."""
-    global _vector_store
-    
-    if _vector_store is None:
-        if not INDEX_DIR.exists():
-            raise RuntimeError(
-                "Knowledge index not found. Run build_knowledge_index first."
-            )
-            
-        embeddings = GeminiEmbeddings()
-        _vector_store = FAISS.load_local(
-            str(INDEX_DIR),
-            embeddings,
-            allow_dangerous_deserialization=True,
-        )
-        
-    return _vector_store
-
-
 def build_knowledge_index():
-    global _vector_store
     documents = []
 
     for file_path in KNOWLEDGE_DIR.glob("*.txt"):
@@ -96,14 +74,24 @@ def build_knowledge_index():
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     vector_store.save_local(str(INDEX_DIR))
-    
-    # Update the global cache immediately after a rebuild
-    _vector_store = vector_store
 
     return len(chunks)
 
 
 def search_knowledge(question: str, k: int = 3):
-    # Uses the cached vector store instead of loading from disk every time
-    vector_store = get_vector_store()
+    if not INDEX_DIR.exists():
+        raise RuntimeError(
+            "Knowledge index not found. Run build_rag_index.py first."
+        )
+
+    embeddings = GeminiEmbeddings()
+
+    vector_store = FAISS.load_local(
+        str(INDEX_DIR),
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+
     return vector_store.similarity_search(question, k=k)
+
+
