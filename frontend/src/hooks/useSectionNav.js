@@ -6,13 +6,13 @@ export const NAV_OFFSET = 76;
 
 /** Single source of truth for the in-page links (Navbar + Footer both read this). */
 export const sectionLinks = [
-  { label: "About", id: "about" },
+  // { label: "About", id: "about" },
   { label: "Variants", id: "products" },
-  { label: "Combos", id: "combos" },
-  { label: "Benefits", id: "benefits" },
+  // { label: "Combos", id: "combos" },
+  // { label: "Benefits", id: "benefits" },
   { label: "Reviews", id: "reviews" },
   { label: "FAQ", id: "faq" },
-  { label: "Contact", id: "contact" },
+  // { label: "Contact", id: "contact" },
 ];
 
 /** Scrolls to a section, allowing for the sticky bar. Returns false if it isn't on the page yet. */

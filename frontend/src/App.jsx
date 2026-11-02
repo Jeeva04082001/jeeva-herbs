@@ -28,6 +28,19 @@ import Account from "./pages/Account";
 import OrderSuccess from "./pages/OrderSuccess";
 import AdminCustomers from "./pages/admin/AdminCustomers";
 import AdminReviews from "./pages/admin/AdminReviews";
+import AdminCustomerDetails from "./pages/admin/AdminCustomerDetails";
+import AISupportChat from "./components/AISupportChat";
+import MasterDataPage from "./pages/admin/MasterDataPage";
+import CustomerTypesPage from "./pages/admin/CustomerTypesPage";
+import SupermarketsPage from "./pages/admin/SupermarketsPage";
+import CustomersPage from "./pages/admin/CustomersPage";
+import CustomerPurchasesPage from "./pages/admin/CustomerPurchasesPage";
+import MySupportTickets from "./pages/MySupportTickets";
+import AdminSupportTickets from "./pages/admin/AdminSupportTickets";
+import CustomerPurchaseHistoryPage from "./pages/admin/CustomerPurchaseHistoryPage";
+import CourierServicesPage from "./pages/admin/CourierServicesPage";
+
+
 
 function App() {
   return (
@@ -58,7 +71,7 @@ function App() {
               <Route path="/orders" element={<CustomerOrders />} />
               <Route path="/orders/:order_number" element={<OrderDetails />} />
               <Route path="/order-success/:order_number" element={<OrderSuccess />} />
-
+              <Route path="/my-support-tickets" element={<MySupportTickets />} />
 
             </Route>
 
@@ -68,8 +81,18 @@ function App() {
               <Route path="/admin/orders" element={<Orders />} />
               <Route path="/products/add" element={<AddProduct />} />
               <Route path="/products/edit/:id" element={<EditProduct />} />
-              <Route path="/admin/customers"element={<AdminCustomers />}/>
-              <Route path="/admin/reviews" element={<AdminReviews />}/>
+              <Route path="/admin/customers" element={<AdminCustomers />} />
+              <Route path="/admin/customers/:customerId" element={<AdminCustomerDetails />} />
+              <Route path="/admin/reviews" element={<AdminReviews />} />
+              <Route path="/admin/master-data" element={<MasterDataPage />} />
+              <Route path="/admin/master-data/customer-types" element={<CustomerTypesPage />} />
+              <Route path="/admin/master-data/supermarkets" element={<SupermarketsPage />} />
+              <Route path="/admin/master-data/customers" element={<CustomersPage />} />
+              <Route path="/admin/master-data/purchases" element={<CustomerPurchasesPage />} />
+              <Route path="/admin/support-tickets" element={<AdminSupportTickets />} />
+              <Route path="/admin/master-data/purchase-history" element={<CustomerPurchaseHistoryPage />} />
+              <Route path="/admin/master-data/courier-services" element={<CourierServicesPage />} />
+
 
             </Route>
 
@@ -77,6 +100,8 @@ function App() {
             <Route path="*" element={<Home />} />
 
           </Routes>
+          {/* AI Customer Support - available across pages */}
+          <AISupportChat />
 
         </CartProvider>
       </AuthProvider>

@@ -356,9 +356,9 @@ function Products() {
 
                     {isAdmin && (
                       <>
-                        <Typography sx={{ fontSize: "0.75rem", color: "#5c554a", mb: 0.5 }}>
+                        {/* <Typography sx={{ fontSize: "0.75rem", color: "#5c554a", mb: 0.5 }}>
                           Stock: {product.stock}
-                        </Typography>
+                        </Typography> */}
 
                         <Typography
                           sx={{

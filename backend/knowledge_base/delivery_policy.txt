@@ -1,0 +1,13 @@
+Jeeva Herbs - Delivery Information
+
+Customers may contact support for questions about their order, shipping, tracking, or delivery delays.
+
+Before answering a delivery question:
+1. Verify the customer's order using the authenticated order details.
+2. Check the actual order status before providing an update.
+3. Do not invent tracking details or delivery dates.
+4. If the order is delayed or the status cannot be verified, create or escalate a support ticket for the team to review.
+
+Delivery time, shipping charges, cancellation rules and return eligibility must be confirmed using the current business policy or the customer's order information. Do not promise a refund, replacement, or delivery date without confirmation.
+
+

@@ -11,6 +11,7 @@ import {
   User,
   MapPin,
   Package,
+  Ticket,
   ChevronRight,
 } from "lucide-react";
 
@@ -192,6 +193,59 @@ function Account() {
           </Button>
 
           <Divider />
+
+          
+
+          {/* MY SUPPORT TICKETS */}
+          <Button
+            component={Link}
+            to="/my-support-tickets"
+            fullWidth
+            sx={{
+              justifyContent: "space-between",
+              textAlign: "left",
+              color: colors.forest,
+              textTransform: "none",
+              p: 2.5,
+              borderRadius: 0,
+              "&:hover": {
+                backgroundColor: colors.leafPale,
+              },
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <Box
+                sx={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "12px",
+                  backgroundColor: colors.leafPale,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ticket size={20} />
+              </Box>
+
+              <Box>
+                <Typography sx={{ fontWeight: 700 }}>
+                  My Support Tickets
+                </Typography>
+
+                <Typography
+                  sx={{
+                    fontSize: "0.85rem",
+                    color: colors.inkSoft,
+                  }}
+                >
+                  View your reported issues and ticket status
+                </Typography>
+              </Box>
+            </Box>
+
+            <ChevronRight size={20} />
+          </Button>
 
           {/* ADDRESSES */}
           <Button

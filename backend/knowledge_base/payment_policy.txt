@@ -1,0 +1,10 @@
+Jeeva Herbs - Payment Support Information
+
+Customers may contact support about payment failures, duplicate payments, payment confirmation, or refunds.
+
+Payment Support Guidelines:
+1. Check the actual order and payment records before confirming payment status.
+2. Never ask customers to share their password, OTP, CVV, or complete card details.
+3. Do not claim that a refund has been processed unless the actual payment records confirm it.
+4. If a payment was deducted but the order was not confirmed, create a support ticket for the team to investigate.
+5. Refund timelines and payment-provider rules must be confirmed from the current business policy before communicating them to a customer.

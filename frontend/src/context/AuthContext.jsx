@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import api from "../services/api";
 
@@ -6,32 +6,51 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
 
   /*
    * Get the currently logged-in user's details.
    * This function is ONLY called after successful login.
    */
+
   async function loadUser() {
     try {
       const response = await api.get("/api/auth/me/");
-
       const currentUser = response.data.user;
 
       setUser(currentUser);
-
       return currentUser;
     } catch (error) {
+      console.error(
+        "Failed to load user:",
+        error.response?.status,
+        error.response?.data || error.message
+      );
+
       if (error.response?.status === 401) {
-        setUser(null);
-      } else {
-        console.error("Failed to load user:", error);
         setUser(null);
       }
 
       return null;
     }
   }
+
+
+
+  useEffect(() => {
+    async function initializeAuth() {
+      try {
+        await loadUser();
+      } finally {
+        setAuthChecked(true);
+        setLoading(false);
+      }
+    }
+
+    initializeAuth();
+  }, []);
+
 
   async function login(email, password) {
     setLoading(true);
@@ -110,6 +129,7 @@ export function AuthProvider({ children }) {
       value={{
         user,
         loading,
+        authChecked,
         login,
         register,
         logout,

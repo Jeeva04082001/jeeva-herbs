@@ -20,6 +20,8 @@ import {
   RefreshCw,
   ClipboardList,
   ArrowRight,
+  Database,
+  Headset,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
@@ -87,6 +89,8 @@ const quickActions = [
   { label: "Manage Orders", to: "/admin/orders", icon: ClipboardList },
   { label: "View Customers", to: "/admin/customers", icon: Users },
   { label: "Manage Reviews", to: "/admin/reviews", icon: ClipboardList },
+  { label: "Manage Master Data", to: "/admin/master-data", icon: Database  },
+  { label: "Manage Support Tickets", to: "/admin/support-tickets", icon: Headset },
 ];
 
 function AdminDashboard() {

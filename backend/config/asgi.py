@@ -32,6 +32,21 @@ class CombinedASGI:
             or path.startswith("/api/reviews")
             or path.startswith("/api/products/{product_id}/reviews")
             or path.startswith("/api/admin/reviews")
+            or path.startswith("/api/admin/customers/{customer_id}")
+            or path.startswith("/api/admin/customer-types")
+            or path.startswith("/api/admin/supermarkets")
+            or path.startswith("/api/admin/customer-purchases")
+            or path.startswith("/api/admin/customers/{customer_id}/purchases")
+            or path.startswith("/api/admin/customer-purchases/{purchase_id}")
+            or path.startswith("/api/support/tickets")
+            or path.startswith("/api/admin/support/tickets")
+            or path.startswith("/api/support/chat")
+            or path.startswith("/api/admin/customer-purchase-histor")
+            or path.startswith("/api/admin/courier-services")
+            or path.startswith("/api/admin/courier-services/{courier_id}")
+            or path.startswith("/api/admin/customer-purchase-tracking")
+            or path.startswith("/api/admin/customer-purchase-tracking/{purchase_group_id}")
+            
             
             or path == "/ws"
         ):

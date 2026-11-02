@@ -9,6 +9,14 @@ import {
     Chip,
     Divider,
     CircularProgress,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    TextField,
+    MenuItem,
+    IconButton,
+    Alert,
 } from "@mui/material";
 import {
     ArrowLeft,
@@ -17,6 +25,7 @@ import {
     CreditCard,
     CheckCircle2,
     Circle,
+    X,
 } from "lucide-react";
 
 import api from "../services/api";
@@ -50,6 +59,17 @@ function OrderDetails() {
 
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [submittingTicket, setSubmittingTicket] = useState(false);
+    const [ticketError, setTicketError] = useState("");
+    const [ticketSuccess, setTicketSuccess] = useState("");
+
+    const [reportDialogOpen, setReportDialogOpen] = useState(false);
+
+    const [reportForm, setReportForm] = useState({
+        category: "",
+        subject: "",
+        description: "",
+    });
 
     useEffect(() => {
         fetchOrder();
@@ -116,6 +136,59 @@ function OrderDetails() {
             console.error("Failed to load order:", error);
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function handleSubmitTicket() {
+        setTicketError("");
+        setTicketSuccess("");
+
+        if (!reportForm.category || !reportForm.subject.trim() || !reportForm.description.trim()) {
+            setTicketError("Please fill in all required fields.");
+            return;
+        }
+
+        try {
+            setSubmittingTicket(true);
+
+            const payload = {
+                order_number: order.order_number,
+                subject: reportForm.subject.trim(),
+                description: reportForm.description.trim(),
+                category: reportForm.category,
+            };
+
+            const response = await api.post(
+                "/api/support/tickets",
+                payload
+            );
+
+            setTicketSuccess(
+                response.data?.message || "Your support ticket has been submitted successfully!"
+            );
+
+            setReportForm({
+                category: "",
+                subject: "",
+                description: "",
+            });
+
+            setTimeout(() => {
+                setReportDialogOpen(false);
+                setTicketSuccess("");
+            }, 2000);
+
+            
+        } catch (error) {
+            console.error("Failed to create support ticket:", error);
+
+            setTicketError(
+                error.response?.data?.detail ||
+                error.response?.data?.message ||
+                "Unable to submit your ticket. Please try again."
+            );
+        } finally {
+            setSubmittingTicket(false);
         }
     }
 
@@ -384,6 +457,228 @@ function OrderDetails() {
                     )}
                 </Card>
 
+                {/* REPORT A PROBLEM */}
+                <Card
+                    elevation={0}
+                    sx={{
+                        border: `1px solid ${colors.line}`,
+                        borderRadius: "16px",
+                        backgroundColor: "#fff",
+                        p: { xs: 2.5, md: 3 },
+                        mt: 2,
+                        mb: 2,
+                    }}
+                >
+                    <Box
+                        sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 2,
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <Typography
+                            sx={{
+                                fontWeight: 600,
+                                color: colors.forest,
+                            }}
+                        >
+                            Need help with your order?
+                        </Typography>
+
+                        <Button
+                            variant="contained"
+                            onClick={() => setReportDialogOpen(true)}
+                            sx={{
+                                backgroundColor: colors.forest,
+                                color: "#fff",
+                                textTransform: "none",
+                                fontWeight: 600,
+                                borderRadius: "10px",
+                                px: 3,
+                                "&:hover": {
+                                    backgroundColor: colors.moss,
+                                },
+                            }}
+                        >
+                            Report a Problem
+                        </Button>
+                    </Box>
+                </Card>
+
+
+                {/* REPORT A PROBLEM DIALOG */}
+                <Dialog
+                    open={reportDialogOpen}
+                    onClose={() => setReportDialogOpen(false)}
+                    fullWidth
+                    maxWidth="sm"
+                    PaperProps={{
+                        sx: {
+                            borderRadius: "18px",
+                            p: { xs: 1, sm: 2 },
+                        },
+                    }}
+                >
+                    <DialogTitle
+                        sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            color: colors.forest,
+                            fontWeight: 700,
+                        }}
+                    >
+                        Report a Problem
+
+                        <IconButton
+                            onClick={() => setReportDialogOpen(false)}
+                            aria-label="Close dialog"
+                        >
+                            <X size={20} />
+                        </IconButton>
+                    </DialogTitle>
+
+                    <DialogContent>
+                        <Typography
+                            sx={{
+                                color: colors.inkSoft,
+                                mb: 2.5,
+                                fontSize: "0.9rem",
+                            }}
+                        >
+                            Tell us about the issue with your order.
+                            Our support team will help you.
+                        </Typography>
+
+                        {/* ORDER NUMBER */}
+                        <TextField
+                            fullWidth
+                            label="Order Number"
+                            value={order.order_number || ""}
+                            disabled
+                            margin="normal"
+                        />
+
+                        {/* ISSUE CATEGORY */}
+                        <TextField
+                            select
+                            fullWidth
+                            label="Issue Type"
+                            value={reportForm.category}
+                            onChange={(e) =>
+                                setReportForm((prev) => ({
+                                    ...prev,
+                                    category: e.target.value,
+                                }))
+                            }
+                            margin="normal"
+                            required
+                        >
+                            <MenuItem value="delivery">Delivery Issue</MenuItem>
+                            <MenuItem value="product">Product Issue</MenuItem>
+                            <MenuItem value="quality">Product Quality</MenuItem>
+                            <MenuItem value="payment">Payment Issue</MenuItem>
+                            <MenuItem value="order">Order Issue</MenuItem>
+                            <MenuItem value="other">Other</MenuItem>
+                        </TextField>
+
+                        {/* SUBJECT */}
+                        <TextField
+                            fullWidth
+                            label="Subject"
+                            placeholder="Briefly describe your issue"
+                            value={reportForm.subject}
+                            onChange={(e) =>
+                                setReportForm((prev) => ({
+                                    ...prev,
+                                    subject: e.target.value,
+                                }))
+                            }
+                            margin="normal"
+                            required
+                        />
+
+                        {/* DESCRIPTION */}
+                        <TextField
+                            fullWidth
+                            label="Describe your problem"
+                            placeholder="Please explain the issue in detail..."
+                            value={reportForm.description}
+                            onChange={(e) =>
+                                setReportForm((prev) => ({
+                                    ...prev,
+                                    description: e.target.value,
+                                }))
+                            }
+                            margin="normal"
+                            multiline
+                            rows={4}
+                            required
+                        />
+                    </DialogContent>
+
+                    {ticketError && (
+                        <Alert severity="error" sx={{ mb: 2 }}>
+                            {ticketError}
+                        </Alert>
+                    )}
+
+                    {ticketSuccess && (
+                        <Alert severity="success" sx={{ mb: 2 }}>
+                            {ticketSuccess}
+                        </Alert>
+                    )}
+
+                    <DialogActions
+                        sx={{
+                            px: 3,
+                            pb: 2,
+                            gap: 1,
+                        }}
+                    >
+                        <Button
+                            onClick={() => setReportDialogOpen(false)}
+                            sx={{
+                                color: colors.inkSoft,
+                                textTransform: "none",
+                            }}
+                        >
+                            Cancel
+                        </Button>
+
+                        <Button
+                            variant="contained"
+                            onClick={handleSubmitTicket}
+                            disabled={submittingTicket || Boolean(ticketSuccess)}
+                            sx={{
+                                backgroundColor: colors.forest,
+                                color: "#fff",
+                                textTransform: "none",
+                                fontWeight: 600,
+                                borderRadius: "10px",
+                                px: 3,
+                                "&:hover": {
+                                    backgroundColor: colors.moss,
+                                },
+                            }}
+                        >
+                            {submittingTicket ? (
+                                <CircularProgress size={20} sx={{ color: "#fff" }} />
+                            ) : ticketSuccess ? (
+                                "Submitted"
+                            ) : (
+                                "Submit Ticket"
+                            )}
+                        </Button>
+
+
+                    </DialogActions>
+                </Dialog>
+
+
+
                 {/* PRODUCTS */}
                 <Card
                     elevation={0}
@@ -528,6 +823,8 @@ function OrderDetails() {
                         </Box>
                     </Box>
                 </Card>
+
+
 
                 {/* TOTAL */}
                 <Card

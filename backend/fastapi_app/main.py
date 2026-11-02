@@ -1,7 +1,10 @@
 import os, json, asyncio
+from datetime import date
 from decimal import Decimal
 from django.db.models import Sum, Avg
 from uuid import uuid4
+from django.db.models import Q
+from collections import defaultdict
 
 # from fastapi import Cookie, Header
 
@@ -18,9 +21,12 @@ from fastapi import (
     Depends,
     Header,
     Cookie,
+    UploadFile,
+    File,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr, field_validator, HttpUrl
+from typing import Optional
 from openai import OpenAI
 from store.models import *
 from django.contrib.auth.models import User
@@ -32,11 +38,17 @@ import redis
 from asgiref.sync import sync_to_async
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
-
-from fastapi import UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from django.conf import settings
+from fastapi_app.ai_support import classify_ticket
+
+# from fastapi_support_placeholder import unused
+from fastapi_app.rag_service import build_knowledge_index
+from fastapi_app.rag_service import search_knowledge
+from fastapi_app.ai_support import generate_support_answer
+import traceback
+from uuid import UUID
+from django.db.models.deletion import ProtectedError
 
 ORIGINS = [
     x.strip()
@@ -271,6 +283,140 @@ class ReviewCreate(BaseModel):
     order_number: str
     rating: int = Field(ge=1, le=5)
     review: str = ""
+
+
+class CustomerIn(BaseModel):
+    full_name: str
+    phone: str
+    email: Optional[EmailStr] = None
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    customer_type_id: int
+    supermarket_id: Optional[int] = None
+    notes: str = ""
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class CustomerUpdate(BaseModel):
+    full_name: str
+    phone: str
+    email: Optional[EmailStr] = None
+    address: str = ""
+    city: Optional[str] = ""
+    state: str = ""
+    pincode: str = ""
+    customer_type_id: int
+    supermarket_id: Optional[int] = None
+    notes: Optional[str] = ""
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+
+class CustomerTypeIn(BaseModel):
+    name: str
+    is_active: bool = True
+
+
+class SupermarketIn(BaseModel):
+    name: str
+    phone: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    pincode: str = ""
+    is_active: bool = True
+
+
+# class CustomerPurchaseIn(BaseModel):
+#     customer_id: int
+#     product_id: int
+#     variant_id: Optional[int] = None
+#     purchase_date: date
+#     quantity: int
+#     unit_price: Decimal
+#     notes: str = ""
+
+
+class CustomerPurchaseItemIn(BaseModel):
+    product_id: int
+    variant_id: Optional[int] = None
+    quantity: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+
+
+class CustomerPurchaseIn(BaseModel):
+    customer_id: int
+    purchase_date: date
+    items: list[CustomerPurchaseItemIn] = Field(min_length=1)
+    notes: str = ""
+
+
+class CustomerPurchaseUpdate(BaseModel):
+    customer_id: int
+    product_id: int
+    variant_id: Optional[int] = None
+    purchase_date: date
+    quantity: int = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    notes: str = ""
+
+
+class SupportTicketCreate(BaseModel):
+    subject: str = Field(min_length=3, max_length=200)
+    description: str = Field(min_length=5, max_length=5000)
+    order_number: Optional[str] = Field(
+        default=None,
+        max_length=24,
+    )
+
+
+class SupportTicketUpdate(BaseModel):
+    status: str
+    admin_reply: str = ""
+    resolution: str = ""
+
+
+class SupportChatRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=1000)
+    conversation_id: str | None = None
+
+
+class CourierServiceIn(BaseModel):
+    courier_name: str = Field(min_length=2, max_length=120)
+    tracking_url_template: str = ""
+    is_active: bool = True
+
+
+class TrackingIn(BaseModel):
+    purchase_group_id: UUID
+    courier_id: int
+    tracking_number: str = Field(min_length=1, max_length=120)
+    tracking_url: str = ""
+    dispatch_date: date | None = None
+    shipment_status: str = "Pending"
+    notes: str = ""
+
+
+class TrackingUpdate(BaseModel):
+    courier_id: int
+    tracking_number: str = Field(min_length=1, max_length=120)
+    tracking_url: str = ""
+    dispatch_date: date | None = None
+    shipment_status: str = "Pending"
+    notes: str = ""
 
 
 def pd(p):
@@ -575,16 +721,79 @@ def admin_dashboard(
     }
 
 
+# @app.get("/api/admin/customers")
+# def admin_customers(
+#     admin=Depends(admin_required),
+# ):
+#     customers = User.objects.filter(is_staff=False).order_by("-date_joined")
+
+#     result = []
+
+#     for customer in customers:
+#         orders = Order.objects.filter(user=customer)
+
+#         total_orders = orders.count()
+
+#         total_spent = orders.filter(status="delivered").aggregate(
+#             total=Sum("total")
+#         ).get("total") or Decimal("0")
+
+#         result.append(
+#             {
+#                 "id": customer.id,
+#                 "name": customer.get_full_name() or customer.username,
+#                 "username": customer.username,
+#                 "email": customer.email,
+#                 "date_joined": customer.date_joined.isoformat(),
+#                 "total_orders": total_orders,
+#                 "total_spent": float(total_spent),
+#             }
+#         )
+
+#     return result
+
+
 @app.get("/api/admin/customers")
 def admin_customers(
     admin=Depends(admin_required),
 ):
-    customers = User.objects.filter(is_staff=False).order_by("-date_joined")
+    # ---------------------------------------------------------
+    # Sync existing registered users into Customer table
+    # ---------------------------------------------------------
+    registered_users = User.objects.filter(is_staff=False).select_related(
+        "customer_profile"
+    )
+
+    for user in registered_users:
+        profile = getattr(user, "customer_profile", None)
+
+        if not profile:
+            continue
+
+        registered_type = CustomerType.objects.filter(
+            name__iexact="registered", is_active=True
+        ).first()
+
+        if registered_type:
+            Customer.objects.update_or_create(
+                user=user,
+                defaults={
+                    "full_name": user.get_full_name() or user.username,
+                    "phone": profile.phone,
+                    "email": user.email or "",
+                    "customer_type": registered_type,
+                },
+            )
+
+    # ---------------------------------------------------------
+    # Get all customers
+    # ---------------------------------------------------------
+    customers = Customer.objects.select_related("user").order_by("-created_at")
 
     result = []
 
     for customer in customers:
-        orders = Order.objects.filter(user=customer)
+        orders = Order.objects.filter(phone=customer.phone)
 
         total_orders = orders.count()
 
@@ -595,16 +804,1211 @@ def admin_customers(
         result.append(
             {
                 "id": customer.id,
-                "name": customer.get_full_name() or customer.username,
-                "username": customer.username,
+                "user_id": customer.user_id,
+                "name": customer.full_name,
+                "phone": customer.phone,
                 "email": customer.email,
-                "date_joined": customer.date_joined.isoformat(),
+                "address": customer.address,
+                "city": customer.city,
+                "state": customer.state,
+                "pincode": customer.pincode,
+                "customer_type": customer.customer_type,
+                "notes": customer.notes,
                 "total_orders": total_orders,
                 "total_spent": float(total_spent),
+                "created_at": customer.created_at.isoformat(),
             }
         )
 
     return result
+
+
+@app.post("/api/admin/customer-types")
+def create_customer_type(
+    data: CustomerTypeIn,
+    admin=Depends(admin_required),
+):
+    name = data.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer type name is required",
+        )
+
+    if CustomerType.objects.filter(name__iexact=name).exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Customer type already exists",
+        )
+
+    customer_type = CustomerType.objects.create(
+        name=name,
+        is_active=data.is_active,
+    )
+
+    return {
+        "success": True,
+        "id": customer_type.id,
+        "name": customer_type.name,
+        "is_active": customer_type.is_active,
+    }
+
+
+@app.get("/api/admin/customer-types")
+def get_customer_types(
+    admin=Depends(admin_required),
+):
+    customer_types = CustomerType.objects.all().order_by("name")
+
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "is_active": item.is_active,
+        }
+        for item in customer_types
+    ]
+
+
+@app.put("/api/admin/customer-types/{customer_type_id}")
+def update_customer_type(
+    customer_type_id: int,
+    data: CustomerTypeIn,
+    admin=Depends(admin_required),
+):
+    try:
+        customer_type = CustomerType.objects.get(id=customer_type_id)
+    except CustomerType.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer type not found",
+        )
+
+    name = data.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer type name is required",
+        )
+
+    if (
+        CustomerType.objects.filter(name__iexact=name)
+        .exclude(id=customer_type_id)
+        .exists()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Customer type already exists",
+        )
+
+    customer_type.name = name
+    customer_type.is_active = data.is_active
+    customer_type.save()
+
+    return {
+        "success": True,
+        "id": customer_type.id,
+        "name": customer_type.name,
+        "is_active": customer_type.is_active,
+    }
+
+
+@app.delete("/api/admin/customer-types/{customer_type_id}")
+def delete_customer_type(
+    customer_type_id: int,
+    admin=Depends(admin_required),
+):
+    try:
+        customer_type = CustomerType.objects.get(id=customer_type_id)
+    except CustomerType.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer type not found",
+        )
+
+    try:
+        customer_type.delete()
+    except ProtectedError:
+        raise HTTPException(
+            status_code=400,
+            detail="This customer type is used by customers and cannot be deleted.",
+        )
+
+    return {
+        "success": True,
+        "message": "Customer type deleted successfully",
+    }
+
+
+@app.post("/api/admin/supermarkets")
+def create_supermarket(
+    data: SupermarketIn,
+    admin=Depends(admin_required),
+):
+    name = data.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Supermarket name is required",
+        )
+
+    if Supermarket.objects.filter(name__iexact=name).exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Supermarket already exists",
+        )
+
+    supermarket = Supermarket.objects.create(
+        name=name,
+        phone=data.phone.strip(),
+        address=data.address.strip(),
+        city=data.city.strip(),
+        state=data.state.strip(),
+        pincode=data.pincode.strip(),
+        is_active=data.is_active,
+    )
+
+    return {
+        "success": True,
+        "id": supermarket.id,
+        "name": supermarket.name,
+        "phone": supermarket.phone,
+        "address": supermarket.address,
+        "city": supermarket.city,
+        "state": supermarket.state,
+        "pincode": supermarket.pincode,
+        "is_active": supermarket.is_active,
+    }
+
+
+@app.get("/api/admin/supermarkets")
+def get_supermarkets(
+    admin=Depends(admin_required),
+):
+    supermarkets = Supermarket.objects.all().order_by("name")
+    # supermarkets = Supermarket.objects.filter(is_active=True).order_by("name")
+
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "phone": item.phone,
+            "address": item.address,
+            "city": item.city,
+            "state": item.state,
+            "pincode": item.pincode,
+            "is_active": item.is_active,
+        }
+        for item in supermarkets
+    ]
+
+
+@app.put("/api/admin/supermarkets/{supermarket_id}")
+def update_supermarket(
+    supermarket_id: int,
+    data: SupermarketIn,
+    admin=Depends(admin_required),
+):
+    try:
+        supermarket = Supermarket.objects.get(id=supermarket_id)
+    except Supermarket.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Supermarket not found",
+        )
+
+    name = data.name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Supermarket name is required",
+        )
+
+    if (
+        Supermarket.objects.filter(name__iexact=name)
+        .exclude(id=supermarket_id)
+        .exists()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Supermarket already exists",
+        )
+
+    supermarket.name = name
+    supermarket.phone = data.phone.strip()
+    supermarket.address = data.address.strip()
+    supermarket.city = data.city.strip()
+    supermarket.state = data.state.strip()
+    supermarket.pincode = data.pincode.strip()
+    supermarket.is_active = data.is_active
+
+    supermarket.save()
+
+    return {
+        "success": True,
+        "id": supermarket.id,
+        "name": supermarket.name,
+        "phone": supermarket.phone,
+        "address": supermarket.address,
+        "city": supermarket.city,
+        "state": supermarket.state,
+        "pincode": supermarket.pincode,
+        "is_active": supermarket.is_active,
+    }
+
+
+@app.delete("/api/admin/supermarkets/{supermarket_id}")
+def delete_supermarket(
+    supermarket_id: int,
+    admin=Depends(admin_required),
+):
+    try:
+        supermarket = Supermarket.objects.get(id=supermarket_id)
+    except Supermarket.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Supermarket not found",
+        )
+
+    try:
+        supermarket.delete()
+    except ProtectedError:
+        raise HTTPException(
+            status_code=400,
+            detail="This supermarket is linked to customers and cannot be deleted.",
+        )
+
+    return {
+        "success": True,
+        "message": "Supermarket deleted successfully",
+    }
+
+
+@app.post("/api/admin/customers")
+def create_customer(
+    data: CustomerIn,
+    admin=Depends(admin_required),
+):
+    customer_type = CustomerType.objects.filter(
+        id=data.customer_type_id,
+        is_active=True,
+    ).first()
+
+    if not customer_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid customer type",
+        )
+
+    supermarket = None
+
+    if data.supermarket_id is not None:
+        supermarket = Supermarket.objects.filter(
+            id=data.supermarket_id,
+            is_active=True,
+        ).first()
+
+        if not supermarket:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid supermarket",
+            )
+    if customer_type.name.lower() == "supermarket" and supermarket is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Supermarket is required for supermarket customers",
+        )
+
+    customer = Customer.objects.create(
+        full_name=data.full_name.strip(),
+        phone=data.phone.strip(),
+        email=(data.email or "").strip(),
+        address=data.address.strip(),
+        city=data.city.strip(),
+        state=data.state.strip(),
+        pincode=data.pincode.strip(),
+        customer_type=customer_type,
+        supermarket=supermarket,
+        notes=data.notes.strip(),
+    )
+
+    return {
+        "success": True,
+        "id": customer.id,
+        "full_name": customer.full_name,
+        "phone": customer.phone,
+        "email": customer.email,
+        "customer_type": {
+            "id": customer.customer_type.id,
+            "name": customer.customer_type.name,
+        },
+        "supermarket": (
+            {
+                "id": customer.supermarket.id,
+                "name": customer.supermarket.name,
+            }
+            if customer.supermarket
+            else None
+        ),
+    }
+
+
+@app.get("/api/admin/customers")
+def admin_customers(
+    admin=Depends(admin_required),
+):
+    # ---------------------------------------------------------
+    # Sync existing registered users into Customer table
+    # ---------------------------------------------------------
+    registered_type = CustomerType.objects.filter(
+        name__iexact="registered",
+        is_active=True,
+    ).first()
+
+    registered_users = User.objects.filter(is_staff=False).select_related(
+        "customer_profile"
+    )
+
+    if registered_type:
+        for user in registered_users:
+            profile = getattr(user, "customer_profile", None)
+
+            if not profile:
+                continue
+
+            Customer.objects.update_or_create(
+                user=user,
+                defaults={
+                    "full_name": user.get_full_name() or user.username,
+                    "phone": profile.phone,
+                    "email": user.email or "",
+                    "customer_type": registered_type,
+                },
+            )
+
+    # ---------------------------------------------------------
+    # Get all customers
+    # ---------------------------------------------------------
+    customers = Customer.objects.select_related(
+        "user",
+        "customer_type",
+        "supermarket",
+    ).order_by("-created_at")
+
+    result = []
+
+    for customer in customers:
+        orders = Order.objects.filter(phone=customer.phone)
+
+        total_orders = orders.count()
+
+        total_spent = orders.filter(status="delivered").aggregate(
+            total=Sum("total")
+        ).get("total") or Decimal("0")
+
+        result.append(
+            {
+                "id": customer.id,
+                "user_id": customer.user_id,
+                "name": customer.full_name,
+                "phone": customer.phone,
+                "email": customer.email,
+                "address": customer.address,
+                "city": customer.city,
+                "state": customer.state,
+                "pincode": customer.pincode,
+                "customer_type": {
+                    "id": customer.customer_type.id,
+                    "name": customer.customer_type.name,
+                },
+                "supermarket": (
+                    {
+                        "id": customer.supermarket.id,
+                        "name": customer.supermarket.name,
+                    }
+                    if customer.supermarket
+                    else None
+                ),
+                "notes": customer.notes,
+                "total_orders": total_orders,
+                "total_spent": float(total_spent),
+                "created_at": customer.created_at.isoformat(),
+            }
+        )
+
+    return result
+
+
+@app.put("/api/admin/customers/{customer_id}")
+def update_customer(
+    customer_id: int,
+    data: CustomerUpdate,
+    admin=Depends(admin_required),
+):
+    try:
+        customer = Customer.objects.get(id=customer_id)
+    except Customer.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    name = data.full_name.strip()
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer name is required",
+        )
+
+    try:
+        customer_type = CustomerType.objects.get(
+            id=data.customer_type_id,
+            is_active=True,
+        )
+    except CustomerType.DoesNotExist:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or inactive customer type",
+        )
+
+    supermarket = None
+
+    if customer_type.name.strip().lower() == "supermarket":
+        if not data.supermarket_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Please select a supermarket",
+            )
+
+        try:
+            supermarket = Supermarket.objects.get(
+                id=data.supermarket_id,
+                is_active=True,
+            )
+        except Supermarket.DoesNotExist:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or inactive supermarket",
+            )
+    elif data.supermarket_id:
+        try:
+            supermarket = Supermarket.objects.get(
+                id=data.supermarket_id,
+                is_active=True,
+            )
+        except Supermarket.DoesNotExist:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or inactive supermarket",
+            )
+
+    customer.full_name = name
+    customer.phone = data.phone.strip()
+    customer.email = (data.email or "").strip()
+    customer.address = (data.address or "").strip()
+    customer.city = (data.city or "").strip()
+    customer.state = (data.state or "").strip()
+    customer.pincode = (data.pincode or "").strip()
+    customer.customer_type = customer_type
+    customer.supermarket = supermarket
+    customer.notes = (data.notes or "").strip()
+
+    customer.save()
+
+    return {
+        "success": True,
+        "message": "Customer updated successfully",
+    }
+
+
+@app.delete("/api/admin/customers/{customer_id}")
+def delete_customer(
+    customer_id: int,
+    admin=Depends(admin_required),
+):
+    try:
+        customer = Customer.objects.get(id=customer_id)
+    except Customer.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    try:
+        customer.delete()
+    except ProtectedError:
+        raise HTTPException(
+            status_code=400,
+            detail="This customer has linked records and cannot be deleted.",
+        )
+
+    return {
+        "success": True,
+        "message": "Customer deleted successfully",
+    }
+
+
+@app.get("/api/admin/customers/{customer_id}")
+def get_customer(
+    customer_id: int,
+    admin=Depends(admin_required),
+):
+    customer = (
+        Customer.objects.select_related("customer_type", "supermarket")
+        .filter(id=customer_id)
+        .first()
+    )
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    return {
+        "id": customer.id,
+        "name": customer.full_name,
+        "phone": customer.phone,
+        "email": customer.email,
+        "address": customer.address,
+        "city": customer.city,
+        "state": customer.state,
+        "pincode": customer.pincode,
+        "customer_type": {
+            "id": customer.customer_type.id,
+            "name": customer.customer_type.name,
+        },
+        "supermarket": (
+            {
+                "id": customer.supermarket.id,
+                "name": customer.supermarket.name,
+            }
+            if customer.supermarket
+            else None
+        ),
+        "notes": customer.notes,
+        "created_at": customer.created_at.isoformat(),
+    }
+
+
+@app.get("/api/admin/courier-services")
+def get_courier_services(
+    include_inactive: bool = False,
+    admin=Depends(admin_required),
+):
+    couriers = CourierService.objects.all().order_by("courier_name")
+
+    if not include_inactive:
+        couriers = couriers.filter(is_active=True)
+
+    return {
+        "success": True,
+        "couriers": [
+            {
+                "id": courier.id,
+                "courier_name": courier.courier_name,
+                "tracking_url_template": courier.tracking_url_template,
+                "is_active": courier.is_active,
+            }
+            for courier in couriers
+        ],
+    }
+
+
+@app.post("/api/admin/courier-services")
+def create_courier_service(
+    data: CourierServiceIn,
+    admin=Depends(admin_required),
+):
+    courier_name = data.courier_name.strip()
+
+    if CourierService.objects.filter(courier_name__iexact=courier_name).exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Courier service already exists",
+        )
+
+    courier = CourierService.objects.create(
+        courier_name=courier_name,
+        tracking_url_template=data.tracking_url_template.strip(),
+        is_active=data.is_active,
+    )
+
+    return {
+        "success": True,
+        "message": "Courier service created successfully",
+        "courier": {
+            "id": courier.id,
+            "courier_name": courier.courier_name,
+            "tracking_url_template": courier.tracking_url_template,
+            "is_active": courier.is_active,
+        },
+    }
+
+
+@app.put("/api/admin/courier-services/{courier_id}")
+def update_courier_service(
+    courier_id: int,
+    data: CourierServiceIn,
+    admin=Depends(admin_required),
+):
+    courier = CourierService.objects.filter(id=courier_id).first()
+
+    if not courier:
+        raise HTTPException(
+            status_code=404,
+            detail="Courier service not found",
+        )
+
+    courier_name = data.courier_name.strip()
+
+    if (
+        CourierService.objects.filter(courier_name__iexact=courier_name)
+        .exclude(id=courier_id)
+        .exists()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Another courier with this name already exists",
+        )
+
+    courier.courier_name = courier_name
+    courier.tracking_url_template = data.tracking_url_template.strip()
+    courier.is_active = data.is_active
+    courier.save()
+
+    return {
+        "success": True,
+        "message": "Courier service updated successfully",
+        "courier": {
+            "id": courier.id,
+            "courier_name": courier.courier_name,
+            "tracking_url_template": courier.tracking_url_template,
+            "is_active": courier.is_active,
+        },
+    }
+
+
+
+
+@app.post("/api/admin/customer-purchase-tracking")
+def create_purchase_tracking(
+    data: TrackingIn,
+    admin=Depends(admin_required),
+):
+    valid_statuses = {
+        "Pending",
+        "Shipped",
+        "In Transit",
+        "Out for Delivery",
+        "Delivered",
+    }
+
+    if data.shipment_status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid shipment status",
+        )
+
+    # Verify the purchase group exists.
+    purchase_exists = CustomerPurchase.objects.filter(
+        purchase_group_id=data.purchase_group_id
+    ).exists()
+
+    if not purchase_exists:
+        raise HTTPException(
+            status_code=404,
+            detail="Purchase group not found",
+        )
+
+    # Prevent duplicate tracking records for the same purchase.
+    if CustomerPurchaseTracking.objects.filter(
+        purchase_group_id=data.purchase_group_id
+    ).exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Tracking details already exist. Use PUT to update.",
+        )
+
+    courier = CourierService.objects.filter(
+        id=data.courier_id,
+        is_active=True,
+    ).first()
+
+    if not courier:
+        raise HTTPException(
+            status_code=404,
+            detail="Active courier service not found",
+        )
+
+    tracking_url = data.tracking_url.strip() or courier.tracking_url_template
+
+    tracking = CustomerPurchaseTracking.objects.create(
+        purchase_group_id=data.purchase_group_id,
+        courier=courier,
+        tracking_number=data.tracking_number.strip(),
+        tracking_url=tracking_url,
+        dispatch_date=data.dispatch_date,
+        shipment_status=data.shipment_status,
+        notes=data.notes.strip(),
+    )
+
+    return {
+        "success": True,
+        "message": "Tracking details saved successfully",
+        "tracking": {
+            "purchase_group_id": str(tracking.purchase_group_id),
+            "courier_id": courier.id,
+            "courier_name": courier.courier_name,
+            "tracking_number": tracking.tracking_number,
+            "tracking_url": tracking.tracking_url,
+            "dispatch_date": (
+                tracking.dispatch_date.isoformat() if tracking.dispatch_date else None
+            ),
+            "shipment_status": tracking.shipment_status,
+            "notes": tracking.notes,
+        },
+    }
+
+
+@app.get("/api/admin/customer-purchase-tracking/{purchase_group_id}")
+def get_purchase_tracking(
+    purchase_group_id: UUID,
+    admin=Depends(admin_required),
+):
+    tracking = (
+        CustomerPurchaseTracking.objects.select_related("courier")
+        .filter(purchase_group_id=purchase_group_id)
+        .first()
+    )
+
+    if not tracking:
+        return {
+            "success": True,
+            "tracking": None,
+        }
+
+    return {
+        "success": True,
+        "tracking": {
+            "purchase_group_id": str(tracking.purchase_group_id),
+            "courier_id": tracking.courier_id,
+            "courier_name": tracking.courier.courier_name,
+            "tracking_number": tracking.tracking_number,
+            "tracking_url": tracking.tracking_url,
+            "dispatch_date": (
+                tracking.dispatch_date.isoformat() if tracking.dispatch_date else None
+            ),
+            "shipment_status": tracking.shipment_status,
+            "notes": tracking.notes,
+        },
+    }
+
+
+@app.put("/api/admin/customer-purchase-tracking/{purchase_group_id}")
+def update_purchase_tracking(
+    purchase_group_id: UUID,
+    data: TrackingUpdate,
+    admin=Depends(admin_required),
+):
+    valid_statuses = {
+        "Pending",
+        "Shipped",
+        "In Transit",
+        "Out for Delivery",
+        "Delivered",
+    }
+
+    if data.shipment_status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid shipment status",
+        )
+
+    tracking = CustomerPurchaseTracking.objects.filter(
+        purchase_group_id=purchase_group_id
+    ).first()
+
+    if not tracking:
+        raise HTTPException(
+            status_code=404,
+            detail="Tracking details not found",
+        )
+
+    courier = CourierService.objects.filter(
+        id=data.courier_id,
+        is_active=True,
+    ).first()
+
+    if not courier:
+        raise HTTPException(
+            status_code=404,
+            detail="Active courier service not found",
+        )
+
+    tracking.courier = courier
+    tracking.tracking_number = data.tracking_number.strip()
+    tracking.tracking_url = data.tracking_url.strip() or courier.tracking_url_template
+    tracking.dispatch_date = data.dispatch_date
+    tracking.shipment_status = data.shipment_status
+    tracking.notes = data.notes.strip()
+    tracking.save()
+
+    return {
+        "success": True,
+        "message": "Tracking details updated successfully",
+        "purchase_group_id": str(tracking.purchase_group_id),
+        "shipment_status": tracking.shipment_status,
+    }
+
+
+@app.post("/api/admin/customer-purchases")
+def create_customer_purchase(
+    data: CustomerPurchaseIn,
+    admin=Depends(admin_required),
+):
+    customer = Customer.objects.filter(
+        id=data.customer_id,
+        is_active=True,
+    ).first()
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    # Generate ONE unique group ID for this purchase transaction.
+    purchase_group_id = uuid.uuid4()
+
+    created_purchases = []
+    grand_total = Decimal("0.00")
+
+    with transaction.atomic():
+
+        for item in data.items:
+
+            product = Product.objects.filter(
+                id=item.product_id,
+                is_active=True,
+            ).first()
+
+            if not product:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Product not found: {item.product_id}",
+                )
+
+            variant = None
+
+            if item.variant_id is not None:
+                variant = ProductVariant.objects.filter(
+                    id=item.variant_id,
+                    product=product,
+                    is_active=True,
+                ).first()
+
+                if not variant:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=(f"Invalid variant for product: " f"{product.name}"),
+                    )
+
+            total_amount = item.unit_price * item.quantity
+
+            purchase = CustomerPurchase.objects.create(
+                customer=customer,
+                purchase_group_id=purchase_group_id,
+                product=product,
+                variant=variant,
+                purchase_date=data.purchase_date,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                total_amount=total_amount,
+                notes=data.notes.strip(),
+            )
+
+            grand_total += total_amount
+
+            created_purchases.append(
+                {
+                    "id": purchase.id,
+                    "product_id": product.id,
+                    "product_name": product.name,
+                    "variant_id": (variant.id if variant else None),
+                    "variant_unit": (variant.unit if variant else None),
+                    "quantity": purchase.quantity,
+                    "unit_price": float(purchase.unit_price),
+                    "total_amount": float(purchase.total_amount),
+                }
+            )
+
+    return {
+        "success": True,
+        "message": "Customer purchase saved successfully",
+        "purchase_group_id": str(purchase_group_id),
+        "customer_id": customer.id,
+        "customer_name": customer.full_name,
+        "purchase_date": data.purchase_date,
+        "items": created_purchases,
+        "item_count": len(created_purchases),
+        "grand_total": float(grand_total),
+    }
+
+
+@app.get("/api/admin/customers/{customer_id}/purchases")
+def get_customer_purchases(
+    customer_id: int,
+    admin=Depends(admin_required),
+):
+    customer = Customer.objects.filter(id=customer_id).first()
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    purchases = (
+        CustomerPurchase.objects.filter(customer=customer)
+        .select_related("product", "variant")
+        .order_by("-purchase_date", "-created_at")
+    )
+
+    return {
+        "customer": {
+            "id": customer.id,
+            "name": customer.full_name,
+            "phone": customer.phone,
+        },
+        "purchases": [
+            {
+                "id": purchase.id,
+                "purchase_group_id": (
+                    str(purchase.purchase_group_id)
+                    if purchase.purchase_group_id
+                    else None
+                ),
+                "product_id": purchase.product.id,
+                "product_name": purchase.product.name,
+                "variant_id": (purchase.variant.id if purchase.variant else None),
+                "variant_unit": (purchase.variant.unit if purchase.variant else None),
+                "purchase_date": purchase.purchase_date,
+                "quantity": purchase.quantity,
+                "unit_price": float(purchase.unit_price),
+                "total_amount": float(purchase.total_amount),
+                "notes": purchase.notes,
+                "created_at": purchase.created_at.isoformat(),
+            }
+            for purchase in purchases
+        ],
+    }
+
+
+@app.get("/api/admin/customer-purchase-history")
+def get_customer_purchase_history(
+    search: str = "",
+    admin=Depends(admin_required),
+):
+    customers = Customer.objects.filter(is_active=True)
+
+    # Search customer by name or phone number
+    if search.strip():
+        customers = customers.filter(
+            Q(full_name__icontains=search.strip()) | Q(phone__icontains=search.strip())
+        )
+
+    result = []
+
+    for customer in customers:
+        purchases = (
+            CustomerPurchase.objects.filter(customer=customer)
+            .select_related("product", "variant")
+            .order_by("-purchase_date", "-created_at")
+        )
+
+        groups = defaultdict(list)
+
+        for purchase in purchases:
+            # Legacy purchases without a group ID remain separate.
+            group_key = (
+                str(purchase.purchase_group_id)
+                if purchase.purchase_group_id
+                else f"legacy-{purchase.id}"
+            )
+
+            groups[group_key].append(
+                {
+                    "purchase_id": purchase.id,
+                    "product_id": purchase.product_id,
+                    "product_name": purchase.product.name,
+                    "variant_id": (purchase.variant_id),
+                    "variant_unit": (
+                        purchase.variant.unit if purchase.variant else None
+                    ),
+                    "quantity": purchase.quantity,
+                    "unit_price": float(purchase.unit_price),
+                    "total_amount": float(purchase.total_amount),
+                    "notes": purchase.notes,
+                }
+            )
+
+        orders = []
+
+        for group_id, items in groups.items():
+            first_purchase = next(
+                p
+                for p in purchases
+                if (
+                    str(p.purchase_group_id) == group_id
+                    if p.purchase_group_id
+                    else f"legacy-{p.id}" == group_id
+                )
+            )
+
+            orders.append(
+                {
+                    "purchase_group_id": (
+                        group_id if not group_id.startswith("legacy-") else None
+                    ),
+                    "purchase_date": str(first_purchase.purchase_date),
+                    "created_at": first_purchase.created_at.isoformat(),
+                    "items": items,
+                    "item_count": len(items),
+                    "grand_total": round(
+                        sum(item["total_amount"] for item in items),
+                        2,
+                    ),
+                    "notes": first_purchase.notes,
+                }
+            )
+
+        orders.sort(
+            key=lambda order: order["created_at"],
+            reverse=True,
+        )
+
+        if orders:
+            result.append(
+                {
+                    "customer_id": customer.id,
+                    "customer_name": customer.full_name,
+                    "phone": customer.phone,
+                    "email": customer.email,
+                    "orders": orders,
+                }
+            )
+
+    return {
+        "success": True,
+        "customers": result,
+        "total_customers": len(result),
+    }
+
+
+@app.put("/api/admin/customer-purchases/{purchase_id}")
+def update_customer_purchase(
+    purchase_id: int,
+    data: CustomerPurchaseUpdate,
+    admin=Depends(admin_required),
+):
+    purchase = CustomerPurchase.objects.filter(id=purchase_id).first()
+
+    if not purchase:
+        raise HTTPException(
+            status_code=404,
+            detail="Purchase not found",
+        )
+
+    customer = Customer.objects.filter(
+        id=data.customer_id,
+        is_active=True,
+    ).first()
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found",
+        )
+
+    product = Product.objects.filter(
+        id=data.product_id,
+        is_active=True,
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found",
+        )
+
+    variant = None
+
+    if data.variant_id is not None:
+        variant = ProductVariant.objects.filter(
+            id=data.variant_id,
+            product=product,
+            is_active=True,
+        ).first()
+
+        if not variant:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid product variant",
+            )
+
+    purchase.customer = customer
+    purchase.product = product
+    purchase.variant = variant
+    purchase.purchase_date = data.purchase_date
+    purchase.quantity = data.quantity
+    purchase.unit_price = data.unit_price
+    purchase.total_amount = data.unit_price * data.quantity
+    purchase.notes = (data.notes or "").strip()
+
+    purchase.save()
+
+    return {
+        "success": True,
+        "message": "Purchase updated successfully",
+        "id": purchase.id,
+        "customer_id": customer.id,
+        "product_id": product.id,
+        "product_name": product.name,
+        "variant_id": variant.id if variant else None,
+        "variant_unit": variant.unit if variant else None,
+        "purchase_date": purchase.purchase_date,
+        "quantity": purchase.quantity,
+        "unit_price": float(purchase.unit_price),
+        "total_amount": float(purchase.total_amount),
+        "notes": purchase.notes,
+    }
+
+
+@app.delete("/api/admin/customer-purchases/{purchase_id}")
+def delete_customer_purchase(
+    purchase_id: int,
+    admin=Depends(admin_required),
+):
+    purchase = CustomerPurchase.objects.filter(id=purchase_id).first()
+
+    if not purchase:
+        raise HTTPException(
+            status_code=404,
+            detail="Purchase not found",
+        )
+
+    purchase.delete()
+
+    return {
+        "success": True,
+        "message": "Purchase deleted successfully",
+    }
 
 
 @app.post("/api/orders")
@@ -1660,6 +3064,331 @@ async def update_order_status(
     }
 
 
+@app.post("/api/support/tickets", status_code=201)
+def create_support_ticket(
+    data: SupportTicketCreate,
+    current_user: User = Depends(get_current_user),
+):
+    # 1. Validate the optional order number
+    order = None
+
+    if data.order_number:
+        try:
+            order = Order.objects.get(
+                order_number=data.order_number,
+                user=current_user,
+            )
+        except Order.DoesNotExist:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found in your account",
+            )
+
+    # 2. Default values if AI is unavailable
+    category = "other"
+    priority = "medium"
+    suggested_reply = ""
+
+    # 3. Classify the ticket using AI
+    try:
+        ai_result = classify_ticket(
+            data.subject,
+            data.description,
+        )
+
+        if ai_result:
+            valid_categories = {choice[0] for choice in SupportTicket.CATEGORY_CHOICES}
+
+            valid_priorities = {choice[0] for choice in SupportTicket.PRIORITY_CHOICES}
+
+            # 4. Accept only valid AI classifications
+            if (
+                ai_result.category in valid_categories
+                and ai_result.priority in valid_priorities
+            ):
+                category = ai_result.category
+                priority = ai_result.priority
+                suggested_reply = ai_result.suggested_reply or ""
+
+            else:
+                print("AI returned invalid category or priority")
+
+    except Exception as e:
+        print(f"AI classification failed: {e}")
+
+    # 5. Save the ticket in the database
+    ticket = SupportTicket.objects.create(
+        user=current_user,
+        order=order,
+        subject=data.subject,
+        description=data.description,
+        category=category,
+        priority=priority,
+        ai_suggested_reply=suggested_reply,
+        status="open",
+    )
+
+    # 6. Return the ticket details
+    return {
+        "success": True,
+        "message": "Support ticket created successfully",
+        "ticket": {
+            "ticket_number": ticket.ticket_number,
+            "subject": ticket.subject,
+            "description": ticket.description,
+            "category": ticket.category,
+            "priority": ticket.priority,
+            "status": ticket.status,
+            "ai_suggested_reply": ticket.ai_suggested_reply,
+            "order_number": (ticket.order.order_number if ticket.order else None),
+            "created_at": ticket.created_at.isoformat(),
+        },
+    }
+
+
+@app.get("/api/support/tickets")
+def my_support_tickets(
+    current_user: User = Depends(get_current_user),
+):
+    tickets = (
+        SupportTicket.objects.filter(user=current_user)
+        .select_related("order")
+        .order_by("-created_at")
+    )
+
+    return [
+        {
+            "id": ticket.id,
+            "ticket_number": ticket.ticket_number,
+            "subject": ticket.subject,
+            "category": ticket.category,
+            "priority": ticket.priority,
+            "status": ticket.status,
+            "order_number": (ticket.order.order_number if ticket.order else None),
+            "created_at": ticket.created_at.isoformat(),
+            "updated_at": ticket.updated_at.isoformat(),
+        }
+        for ticket in tickets
+    ]
+
+
+@app.get("/api/support/tickets/{ticket_id}")
+def get_my_support_ticket(
+    ticket_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        ticket = SupportTicket.objects.select_related("order").get(
+            id=ticket_id,
+            user=current_user,
+        )
+    except SupportTicket.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Support ticket not found",
+        )
+
+    return {
+        "ticket_number": ticket.ticket_number,
+        "subject": ticket.subject,
+        "description": ticket.description,
+        "category": ticket.category,
+        "priority": ticket.priority,
+        "status": ticket.status,
+        "ai_suggested_reply": ticket.ai_suggested_reply,
+        "admin_reply": ticket.admin_reply,
+        "resolution": ticket.resolution,
+        "order_number": (ticket.order.order_number if ticket.order else None),
+        "created_at": ticket.created_at.isoformat(),
+        "updated_at": ticket.updated_at.isoformat(),
+    }
+
+
+@app.get("/api/admin/support/tickets")
+def admin_support_tickets(
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_staff:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required",
+        )
+
+    tickets = SupportTicket.objects.select_related("user", "order").order_by(
+        "-created_at"
+    )
+
+    return [
+        {
+            "id": ticket.id,
+            "ticket_number": ticket.ticket_number,
+            "customer": (ticket.user.username if ticket.user else None),
+            "subject": ticket.subject,
+            "description": ticket.description,
+            "category": ticket.category,
+            "priority": ticket.priority,
+            "status": ticket.status,
+            "ai_suggested_reply": ticket.ai_suggested_reply,
+            "admin_reply": ticket.admin_reply,
+            "resolution": ticket.resolution,
+            "created_at": ticket.created_at.isoformat(),
+            "updated_at": ticket.updated_at.isoformat(),
+        }
+        for ticket in tickets
+    ]
+
+
+@app.put("/api/admin/support/tickets/{ticket_id}")
+def update_support_ticket(
+    ticket_id: int,
+    data: SupportTicketUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_staff:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required",
+        )
+
+    valid_statuses = {choice[0] for choice in SupportTicket.STATUS_CHOICES}
+
+    if data.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid ticket status",
+        )
+
+    try:
+        ticket = SupportTicket.objects.get(id=ticket_id)
+    except SupportTicket.DoesNotExist:
+        raise HTTPException(
+            status_code=404,
+            detail="Ticket not found",
+        )
+
+    ticket.status = data.status
+    ticket.admin_reply = data.admin_reply
+    ticket.resolution = data.resolution
+    ticket.save(
+        update_fields=[
+            "status",
+            "admin_reply",
+            "resolution",
+            "updated_at",
+        ]
+    )
+
+    return {
+        "success": True,
+        "ticket_number": ticket.ticket_number,
+        "status": ticket.status,
+        "admin_reply": ticket.admin_reply,
+        "resolution": ticket.resolution,
+    }
+
+
+def get_product_context():
+    products = Product.objects.filter(is_active=True).prefetch_related("variants")
+
+    product_details = []
+
+    for product in products:
+        variants = [
+            {
+                "unit": variant.unit,
+                "price": str(variant.price),
+                "in_stock": variant.stock > 0,
+            }
+            for variant in product.variants.all()
+            if variant.is_active
+        ]
+
+        product_details.append(
+            {
+                "name": product.name,
+                "category": product.category,
+                "description": product.description,
+                "ingredients": product.ingredients,
+                "variants": variants,
+            }
+        )
+
+    return json.dumps(product_details, ensure_ascii=False)
+
+
+# Remove the search_knowledge import at the top of main.py if it's no longer used elsewhere
+# from fastapi_app.rag_service import search_knowledge  <-- Remove this line
+
+@app.post("/api/support/chat")
+def support_chat(data: SupportChatRequest):
+    try:
+        # 1. Create or reuse conversation ID
+        conversation_id = data.conversation_id or str(uuid4())
+        redis_key = f"support_chat:{conversation_id}"
+
+        # 2. Retrieve temporary conversation history from Redis
+        stored_history = redis_client.get(redis_key)
+
+        history = []
+        if stored_history:
+            history = json.loads(stored_history)
+            if len(history) >= 20:
+                history = history[-20:]
+            else:
+                history = history
+
+        conversation_history = "\n".join(
+            f"{'Customer' if item['role'] == 'user' else 'Assistant'}: "
+            f"{item['content']}"
+            for item in history
+            if item.get("role") in ("user", "assistant")
+        )
+
+        # 3. Get current product details from database
+        product_context = get_product_context()
+
+        # 4. Generate answer - The LLM will now dynamically call the RAG tool if it needs to
+        answer = generate_support_answer(
+            question=data.question,
+            product_context=product_context, # Pass product_context directly
+            conversation_history=conversation_history,
+        )
+
+        # 5. Save recent messages temporarily in Redis
+        history.extend(
+            [
+                {"role": "user", "content": data.question},
+                {"role": "assistant", "content": answer},
+            ]
+        )
+
+        history = history[-20:]
+
+        redis_client.setex(
+            redis_key,
+            1800,  # 30-minute expiry
+            json.dumps(history, ensure_ascii=False),
+        )
+
+        # 6. Return answer
+        return {
+            "success": True,
+            "answer": answer,
+            "sources": ["AI Assistant"], # Simplified since the LLM manages the sources internally now
+            "conversation_id": conversation_id,
+        }
+
+    except Exception as e:
+        print(f"Support chat error: {type(e).__name__}: {e!r}", flush=True)
+        import traceback
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to answer your question right now.",
+        )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
 
@@ -1682,34 +3411,34 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-@app.post("/api/chat")
-def chat(d: Chat):
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return {
-            "answer": "AI chat is not configured yet. Please contact Jeeva Herbs on WhatsApp.",
-            "configured": False,
-        }
-    ps = "\n".join(
-        f"- {p.name}: "
-        f'{", ".join(f"{v.unit}=₹{v.price} (stock={v.stock})" for v in p.variants.all() if v.is_active)}; '
-        f'ingredients={", ".join(p.ingredients)}; '
-        f"{p.description}"
-        for p in Product.objects.filter(is_active=True).prefetch_related("variants")
-    )
-    fs = "\n".join(
-        f"- {f.question}: {f.answer}" for f in FAQ.objects.filter(active=True)
-    )
-    system = f"""You are Jeeva, the Jeeva Herbs customer-support assistant. Answer only about products, ordering, ingredients, preparation, delivery, payments and approved FAQs. Reply in the customer language (English, Tamil or Tanglish). Never diagnose, prescribe or claim a food treats/cures a disease. For pregnancy, children, allergies, medication interactions or health conditions, recommend a qualified doctor. Never invent prices, stock, ingredients, nutrition, certification or delivery promises.\nPRODUCTS:\n{ps}\nFAQ:\n{fs}"""
-    c = OpenAI(api_key=key)
-    msgs = (
-        [{"role": "system", "content": system}]
-        + [x for x in d.history[-10:] if x.get("role") in ("user", "assistant")]
-        + [{"role": "user", "content": d.message}]
-    )
-    r = c.responses.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"),
-        input=msgs,
-        max_output_tokens=500,
-    )
-    return {"answer": r.output_text, "configured": True}
+# @app.post("/api/chat")
+# def chat(d: Chat):
+#     key = os.getenv("OPENAI_API_KEY", "").strip()
+#     if not key:
+#         return {
+#             "answer": "AI chat is not configured yet. Please contact Jeeva Herbs on WhatsApp.",
+#             "configured": False,
+#         }
+#     ps = "\n".join(
+#         f"- {p.name}: "
+#         f'{", ".join(f"{v.unit}=₹{v.price} (stock={v.stock})" for v in p.variants.all() if v.is_active)}; '
+#         f'ingredients={", ".join(p.ingredients)}; '
+#         f"{p.description}"
+#         for p in Product.objects.filter(is_active=True).prefetch_related("variants")
+#     )
+#     fs = "\n".join(
+#         f"- {f.question}: {f.answer}" for f in FAQ.objects.filter(active=True)
+#     )
+#     system = f"""You are Jeeva, the Jeeva Herbs customer-support assistant. Answer only about products, ordering, ingredients, preparation, delivery, payments and approved FAQs. Reply in the customer language (English, Tamil or Tanglish). Never diagnose, prescribe or claim a food treats/cures a disease. For pregnancy, children, allergies, medication interactions or health conditions, recommend a qualified doctor. Never invent prices, stock, ingredients, nutrition, certification or delivery promises.\nPRODUCTS:\n{ps}\nFAQ:\n{fs}"""
+#     c = OpenAI(api_key=key)
+#     msgs = (
+#         [{"role": "system", "content": system}]
+#         + [x for x in d.history[-10:] if x.get("role") in ("user", "assistant")]
+#         + [{"role": "user", "content": d.message}]
+#     )
+#     r = c.responses.create(
+#         model=os.getenv("OPENAI_MODEL", "gpt-5.6-luna"),
+#         input=msgs,
+#         max_output_tokens=500,
+#     )
+#     return {"answer": r.output_text, "configured": True}

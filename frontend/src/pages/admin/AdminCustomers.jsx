@@ -10,6 +10,7 @@ import {
   TextField,
   InputAdornment,
   Chip,
+  Button,
 } from "@mui/material";
 
 import {
@@ -24,6 +25,8 @@ import {
 
 import api from "../../services/api";
 import { colors, fonts } from "../../theme/brand";
+import { useNavigate } from "react-router-dom";
+
 
 const RADIUS = "16px";
 
@@ -53,6 +56,8 @@ function getInitials(name) {
 }
 
 function AdminCustomers() {
+
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [filteredCustomers, setFilteredCustomers] = useState([]);
 
@@ -75,7 +80,7 @@ function AdminCustomers() {
     const filtered = customers.filter((customer) => {
       return (
         customer.name?.toLowerCase().includes(query) ||
-        customer.username?.toLowerCase().includes(query) ||
+        customer.phone?.toLowerCase().includes(query) ||
         customer.email?.toLowerCase().includes(query)
       );
     });
@@ -246,7 +251,7 @@ function AdminCustomers() {
             <TextField
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search customer name or email..."
+              placeholder="Search name, phone or email..."
               size="small"
               fullWidth
               sx={{
@@ -289,9 +294,8 @@ function AdminCustomers() {
               >
                 {loading
                   ? "Loading..."
-                  : `${filteredCustomers.length} customer${
-                      filteredCustomers.length === 1 ? "" : "s"
-                    }`}
+                  : `${filteredCustomers.length} customer${filteredCustomers.length === 1 ? "" : "s"
+                  }`}
               </Typography>
             </Box>
           </Box>
@@ -398,7 +402,7 @@ function AdminCustomers() {
                     display: "grid",
                     gridTemplateColumns: {
                       xs: "1fr",
-                      md: "1.6fr 1.7fr 0.7fr 0.8fr 0.9fr",
+                      md: "1.5fr 1.5fr 1fr 1fr 0.7fr 0.8fr 1fr",
                     },
 
                     alignItems: "center",
@@ -485,7 +489,7 @@ function AdminCustomers() {
                           mt: 0.15,
                         }}
                       >
-                        @{customer.username || "-"}
+                        {customer.phone || "-"}
                       </Typography>
                     </Box>
                   </Box>
@@ -537,6 +541,63 @@ function AdminCustomers() {
                         {customer.email || "-"}
                       </Typography>
                     </Box>
+                  </Box>
+
+
+                  {/* CUSTOMER TYPE */}
+                  <Box>
+                    <Typography
+                      sx={{
+                        fontSize: "0.64rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                        color: colors.inkSoft,
+                        mb: 0.5,
+                      }}
+                    >
+                      TYPE
+                    </Typography>
+
+                    <Chip
+                      label={customer.customer_type?.name || "-"}
+                      size="small"
+                      sx={{
+                        height: 26,
+                        borderRadius: "8px",
+                        backgroundColor: colors.leafPale,
+                        color: colors.forest,
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                      }}
+                    />
+                  </Box>
+
+                  {/* SUPERMARKET */}
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography
+                      sx={{
+                        fontSize: "0.64rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                        color: colors.inkSoft,
+                        mb: 0.25,
+                      }}
+                    >
+                      SUPERMARKET
+                    </Typography>
+
+                    <Typography
+                      sx={{
+                        fontSize: "0.78rem",
+                        color: colors.forest,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={customer.supermarket?.name || ""}
+                    >
+                      {customer.supermarket?.name || "-"}
+                    </Typography>
                   </Box>
 
                   {/* ORDERS */}
@@ -651,11 +712,35 @@ function AdminCustomers() {
                         }}
                       >
                         {formatDate(
-                          customer.date_joined
+                          customer.created_at
                         )}
                       </Typography>
                     </Box>
                   </Box>
+
+                  {/* VIEW DETAILS */}
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => navigate(`/admin/customers/${customer.id}`)}
+                    sx={{
+                      borderColor: colors.line,
+                      color: colors.forest,
+                      borderRadius: "9px",
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      textTransform: "none",
+                      whiteSpace: "nowrap",
+                      "&:hover": {
+                        borderColor: colors.moss,
+                        backgroundColor: colors.leafPale,
+                      },
+                    }}
+                  >
+                    View Details
+                  </Button>
+
+                  
                 </Box>
               </Card>
             ))}

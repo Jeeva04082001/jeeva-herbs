@@ -80,3 +80,41 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+
+
+
+
+
+export async function sendSupportMessage(question, conversationId = null) {
+  const response = await fetch(
+    "http://localhost:8002/api/support/chat",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        question,
+        conversation_id: conversationId,
+      }),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.detail || "Unable to get a support response"
+    );
+  }
+
+  return data;
+}
+
+
+
+
+
+
+
